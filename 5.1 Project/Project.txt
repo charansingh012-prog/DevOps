@@ -1,0 +1,370 @@
+==================================================
+PROJECT - Jenkins, Sonar, Nexus, S3 and Ansible Modules deployment to Tomcat
+====================================================
+
+Draw architecture diagram
+
+developers push code --> Jenkins(Ansible) --> deploy --> Nodes(tomcats)
+                     (CI = CodeBuild+ CodeTest)
+                           Artifacts
+
+checkout --> Build --> Test --> Artifacts --> Nexus/S3 --> Deploy(Tomcat)
+
+Step 1 --> Push code to GitHub
+Step 2 --> Generate Artifacts
+Step 3 --> Storing the Artifacts
+Step 4 --> Installing Tomcat
+Step 5 --> Deploy the artifacts to nodes using Ansible
+
+Pipelines will be integrated with Ansible Playbook
+
+use the same machines, install Jenkins on ansible server
+
+Total 5 machines
+---------------
+
+Launch EC2 instance t2.micro = Jenkins + Ansible
+Launch EC2 instance t2.medium = Nexus, 8081
+Launch EC2 instance t2.medium = Sonar ,9000
+Launch EC2 instance 2 t2.micro = worker nodes where we have application running with tomcat. tomcat1 and tomcat2
+
+Step 1 --> keep the code in GitHub (use java-project-new)
+----------------------------------------------------
+
+https://github.com/ReyazShaik/java-project-maven-new.git
+
+
+Step 2 -->  install Jenkins and ansible in server using script
+-----------------------------------------------------------
+Install Jenkins
+=====================================================
+#STEP-1: INSTALLING GIT JAVA-1.8.0 MAVEN
+yum install git java-1.8.0-openjdk maven -y
+
+#STEP-2: GETTING THE REPO (jenkins.io --> download -- > redhat)
+sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+
+#STEP-3: DOWNLOAD JAVA11 AND JENKINS
+amazon-linux-extras install java-openjdk11 -y
+yum install jenkins -y
+update-alternatives --config java
+
+#STEP-4: RESTARTING JENKINS (when we download service it will on stopped state)
+systemctl start jenkins.service
+systemctl status jenkins.service
+================================================================
+
+Setup Ansible and their worker nodes
+-----------------------------------
+Install Ansible
+----------------
+amazon-linux-extras install ansible2 -y
+
+yum install python3 python-pip python-dlevel -y
+
+ansible --version
+
+============================================================================================================
+SETUP:
+Login to Jenkins+Ansible Server and setup connections to 2 Worker Nodes(tomcat1 and tomcat2)
+
+EXECUTE THE BELOW COMMANDS ON ALL SERVERS:
+sudo -i
+hostnamectl set-hostname ansible/dev-1/dev-2/test-1/test-2
+sudo -i
+
+## first set the password for root
+passwd root  
+
+set new password: reyaz123
+
+## enable all server to login as root
+
+vi /etc/ssh/sshd_config (38 & 61 uncomment both lines)
+systemctl restart sshd
+systemctl status sshd
+hostname -i
+
+
+Inventory file
+=============
+
+vi /etc/ansible/hosts
+# Ex 1: Ungrouped hosts, specify before any group headers.
+[Prod]
+172.31.20.40
+172.31.21.25
+
+Lets Generate SSH Keys, using this KEY Ansible server will communicate with worker nodes
+
+ssh-keygen
+
+ssh-copy-id root@private ip of prod-1
+ssh-copy-id root@private ip of prod-2
+
+========================================================================================================
+
+Step 3: Setup SonarQube and Nexus and S3
+
+
+Install Plugins
+--------------
+SonarQube Scanner,
+Maven Integration plugins
+Sonar Scanner Quality Gates
+Nexus
+Ansible
+deploy to container,
+S3 Publisher
+
+     
+
+
+
+==================================================================================================================================
+Step 5 : Create a Jenkins pipeline
+-----------------------------------
+
+First install plugins - Nexus and Ansible, sonar, maven, deploy to container, S3 Publisher
+---------------------
+
+Jenkins --> Manage Jenkins --> plugins --> nexus artifact upload, SonarQube Scanner, Maven Integration, deploy to container and ansible --> install --> restart jenkins
+
+Manage Jenkins --> tools --> Add ansible --> Name=ansible, path = /bin
+
+pipeline code till artifacts and run the pipeline --> it will generate war file
+
+pipeline {
+    agent any
+   
+    stages {
+        stage('checkout') {
+            steps {
+                git 'https://github.com/ReyazShaik/java-project-maven-new.git&#39;
+            }
+        }
+        stage('build') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('artifact') {
+            steps {
+                sh 'mvn package'
+            }
+        }
+    }
+}
+
+**Build now***
+
+
+
+
+**Build now***
+
+Now Deployment to Production Nodes using Ansible
+--------------------------------------------------
+
+Go to Ansible master Server
+
+Install tomcat in all Production nodes using Ansible
+---------------------------------------------------
+
+vi tomcat.yml
+
+---
+- name: Setup Tomcat
+  hosts: all
+  become: yes
+  tasks:
+    - name: Download tomcat from dlcdn
+      get_url:
+        url: "https://dlcdn.apache.org/tomcat/tomcat-10/v10.1.35/bin/apache-tomcat-10.1.35.tar.gz&quot;
+        dest: "/root/"
+
+    - name: untar the apache file
+      command: tar -zxvf apache-tomcat-10.1.35.tar.gz
+
+    - name: Rename the tomcat
+      command: mv apache-tomcat-10.1.35 tomcat
+
+    - name: Install the latest available Java (OpenJDK)
+      yum:
+        name: java-17-amazon-corretto
+        state: present
+
+    - name: Setting the roles in tomcat-users.xml file
+      template:
+        src: tomcat-users.xml
+        dest: /root/tomcat/conf/tomcat-users.xml
+
+    - name: Delete two lines in context.xml
+      template:
+        src: context.xml
+        dest: /root/tomcat/webapps/manager/META-INF/context.xml
+    - name: Create Tomcat systemd Service File
+      copy:
+        dest: /etc/systemd/system/tomcat.service
+        content: |
+          [Unit]
+          Description=Apache Tomcat Server
+          After=network.target
+
+          [Service]
+          User=root
+          Group=root
+          Type=forking
+          Environment="JAVA_HOME=/usr/lib/jvm/jre"
+          Environment="CATALINA_HOME=/root/tomcat"
+          ExecStart=/root/tomcat/bin/startup.sh
+          ExecStop=/root/tomcat/bin/shutdown.sh
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+    - name: Start tomcat Service
+      service:
+        name: tomcat
+        state: started
+        enabled: yes
+
+
+================================================================================
+
+sed -i 's/87/93/g' tomcat.yml  -- if required
+
+
+--> instead changing tomcat-user.xml and context.xml in all nodes just create files locally and replace in worker nodes
+
+--> vi tomcat-users.xml
+   this file is in git-hub copy paste the content --it has all changed usernames etc
+--> vi context.xml
+   this file is in git-hub copy paste the content --it has all changed usernames etc
+
+ansible-playbook tomcat.yml
+
+run the playbook --> it will install tomcat in all worker nodes
+check with workernodes ip, tomcat is working or not
+
+Now artifacts are in /var/lib/Jenkins/workspace/project/targets
+
+cd /var/lib/Jenkins/workspace/project/target
+
+now create another playbook
+
+Note: In below playbook, change the source to your target project directory
+
+vi deploy.yml
+---
+- name: Deploy war to tomcat servers
+  hosts: all
+  tasks:
+    - name: task1
+      copy:
+        src: /var/lib/jenkins/workspace/project/target/myapp.war
+        dest: /root/tomcat/webapps
+
+RUn the playbook
+
+ansible-playbook deploy.yml
+
+--------> this is manual work, not good, now use pipelines
+
+Integrate ansible to Jenkins
+===========================
+
+Manage Jenkins --> TOOLS --> Ansible --> name = ansible, path = /bin
+
+Manage Jenkins --> Credentials --> username and password --username = root , password = rooot123456 (password while setting up ssh connection to tomcat servers from ansible ssh) , ID = linuxcreds
+
+or
+
+Manage Jenkins --> Credentials --> SSH username with Private Key --username = ec2-user , id = linuxcreds
+Private Key -> Enter Directly--> Add --> pem file key
+
+
+mv deploy.yml /etc/ansible
+
+cd /etc/ansible --> all ansible files are in this folder
+   
+open pipeline --> add deploy stage --> generate pipeline syntax -->
+
+        stage('Run Ansible Playbook') {
+            steps {
+               
+            }
+ 
+
+Sample Step = ansibleplaybook:invoke an ansible playbook
+
+Ansible tool : ansible  
+Playbook file path in workspace = /etc/ansible/deploy.yml
+Inventory file path in workspace =  /etc/ansible/hosts
+SSH connection credentials = linuxcreds
+disable ssh host key check --> check it --> rest all defaults
+
+Below code will come
+-------------------
+ansiblePlaybook credentialsId: 'linuxcreds', disableHostKeyChecking: true, installation: 'ansible', inventory: '/etc/ansible/hosts', playbook: '/etc/ansible/deploy.yml', vaultTmpPath: ''
+
+
+Optional:
+(host subset - we can give test or dev or prod , no need to give in playbook host: dev)
+(in host subset give $server = prod)
+copy the script and put in deploy section in pipeline --> in pipeline ansible stage  see limit : '$server' will come
+
+Below code will come
+-------------------
+ansiblePlaybook credentialsId: 'tomcatcreds', disableHostKeyChecking: true, installation: 'ansible', inventory: '/etc/ansible/hosts', limit: '$server = prod', playbook: '/etc/ansible/deploy.yml', vaultTmpPath: ''
+
+
+before executing pipeline, undeploy application from tomcat by going to browser of workernodes
+pipeline {
+    agent any
+   
+    stages {
+        stage('checkout') {
+            steps {
+                git 'https://github.com/ReyazShaik/java-project-maven-new.git&#39;
+            }
+        }
+        stage('build') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.7.0.1746:sonar'
+                }
+            }
+        }
+
+        stage('artifact') {
+            steps {
+                sh 'mvn package'
+            }
+        }
+        stage('Run Ansible Playbook') {
+            steps {
+                ansiblePlaybook credentialsId: 'linuxcreds', disableHostKeyChecking: true, installation: 'ansible', inventory: '/etc/ansible/hosts', playbook: '/etc/ansible/deploy.yml', vaultTmpPath: ''
+            }
+        }
+    }
+}

@@ -1,0 +1,392 @@
+TAGS: used to execute or skip specific tasks in playbook.
+======================================================
+---
+- name: TAGS Playbook
+  hosts: all
+  tasks:
+    - name: installing git
+      yum: name=git state=present
+      tags: git
+    - name: installing docker
+      yum: name=docker state=present
+      tags: dockerinstall
+    - name: starting docker
+      service: name=docker state=started
+      tags: dockerstart
+    - name: create user
+      user: name=suresh state=present
+      tags: user
+
+SINGLE TAG:ansible-playbook reyaz.yml --tags user
+MULTI TAG: ansible-playbook reyaz.yml --tags dockerinstall,dockerstart
+
+--> remove all packages now
+
+sed -i 's/present/absent/g' reyaz.yml   or  sed -i 's/present/absent/; s/installing/uninstalling/' reyaz.yml  ---> replace words using sed
+
+
+ansible all -a "yum install git -y"
+
+SKIPPING SINGLE TAG: ansible-playbook reyaz.yml --skip-tags "git"
+
+SKIPPING MULTI TAG: ansible-playbook reyaz.yml --skip-tags "dockerinstall,dockerstart"
+
+===================================
+
+
+VARIBALES: Static variables and Dynamic Variables
+
+============================================
+
+remove all packages first to install again
+
+ansible all -a "yum remove git* maven* httpd* docker* -y"
+
+STATIC VARS: these variables will declared inside playbook.
+it will not change until unless we change.
+
+vi staticvar.yml
+
+---
+- name: STATIC Variable
+  hosts: all
+  vars:
+    a: git
+    b: maven
+  tasks:
+    - name: installing git
+      yum: name={{a}} state=present
+    - name: installing maven
+      yum: name={{b}} state=present
+
+
+ansible-playbook staticvar.yml
+
+---> now uninstall again
+
+sed -i 's/present/absent/g' staticvar.yml
+
+ansible-playbook staticvar.yml
+
+
+DYNAMIC VARS: these variables will declared outside playbook.it will  change frequently as per our requirement.
+--------------------------------------------------------------------
+
+
+vi dynamicvar.yml
+
+---
+- name: Dynamic Vars
+  hosts: all
+  tasks:
+    - name: installing pkg
+      yum: name={{a}} state=present
+    - name: installing pkg
+      yum: name={{b}} state=present    
+
+ansible-playbook dynamicvar.yml --extra-vars "a=git b=maven"
+
+uninstall again
+------
+
+sed -i 's/present/absent/' dynamicvar.yml
+
+ansible-playbook dynamicvar.yml --extra-vars "a=git b=maven"
+
+=====================================
+LOOPS - Reduce the number of lines of code
+====================
+
+Make sure no software are there on workernodes, we will run the commands again
+
+vi loop.yml
+
+---
+- name: Loops playbook
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: installing pkgs
+      yum: name={{item}} state=present
+      with_items:
+        - git
+        - tree
+        - docker
+        - httpd
+        - java-1.8.0-openjdk
+        - maven
+
+ansible-playbook loop.yml
+
+see all packges are installed
+ansible all -a "mvn -v"
+ansible all -a "docker -v"
+
+uninstall
+---------
+
+vi loopuninstall.yml
+
+---
+- name: uninstalling pkgs
+  hosts: all
+  tasks:
+    - name: uninstalling pkgs
+      yum: name="{{item}}" state=absent
+      with_items:
+        - git*
+        - tree*
+        - httpd*
+        - java-1.8.0-openjdk*
+        - maven*
+
+ansible-playbook loopuninstall.yml
+
+ansible all -a "mvn -v"
+ansible all -a "docker -v"
+
+
+creating users - replace yum module with user in playbook
+-------------
+
+vi loopusers.yml
+
+---
+- name: Loops playbook
+  hosts: all
+  tasks:
+    - name: Creating Users
+      user: name="{{item}}" state=present
+      loop:
+        - lucky
+        - imthiaz
+        - siva
+        - rajesh
+        - pavan
+
+ansible-playbook loopusers.yml
+
+ansible all -a "cat /etc/passwd"
+
+remove users
+-----------
+
+vi removeloopusers.yml
+
+---
+- name: uninstall pkgs
+  hosts: all
+  tasks:
+    - name: uninstalling pkgs
+      user: name="{{item}}" state=absent
+      loop:
+        - lucky
+        - imthiaz
+        - siva
+        - rajesh
+        - pavan
+
+ansible-playbook removeloopusers.yml
+
+
+
+==============================
+Handlers:
+===============================
+
+one task will depend on another task.
+when task-1 is executed it will ask to run task-2.
+notify is used to tell task-2 to execute.
+
+---> apache should be installed first and then start apache later, so starting service is depending on installation
+--> notify is calling the handler
+
+vi handlers.yml
+
+---
+- name: Handlers
+  hosts: all
+  tasks:
+    - name: installing apache
+      yum: name=httpd state=present
+      notify: starting apache
+
+  handlers:
+    - name: starting apache
+      service: name=httpd state=started
+
+ansible-playbook handlers.yml
+
+--->
+sed -i 's/present/absent/g; s/install/uninstall/g' handlers.yml
+
+or
+
+vi handlersuninstall.yml  ---> httpd will be uninstalled, but there is no service to start , so ignore errors
+
+---
+- name: Handlers uninstall
+  hosts: all
+  tasks:
+    - name: uninstalling apache
+      yum: name=httpd state=absent
+      notify: starting apache
+
+  handlers:
+    - name: starting apache
+      service: name=httpd state=started
+      ignore_errors: yes
+
+
+ansible-playbook handlersuninstall.yml
+
+============================
+SHELL in Playbook
+========================
+
+We can directly run shell / Linux commands in playbook , use module shell or command or raw module, all are same -->
+
+raw is latest module, raw is commonly used
+
+✅ Use command whenever possible (it's safer).
+✅ Use shell only if needed (for pipes, loops, variables).
+✅ Use raw only for bootstrapping systems without Python.
+
+
+vi shell.yml
+
+
+---
+- name: Shell in Playbook
+  hosts: all
+  tasks:
+    - name: installing apache
+      shell: yum install httpd -y
+
+    - name: installing git
+      command: yum install git -y
+
+    - name: installing maven
+      raw: yum install maven -y
+
+
+ansible-playbook shell.yml
+
+uninstall
+---------
+
+sed -i 's/install/remove' shell.yml
+
+or
+
+vi shellremove.yml
+
+- hosts: all
+  tasks:
+    - name: installing apache
+      shell: yum remove httpd -y
+
+    - name: installing git
+      command: yum remove git -y
+
+    - name: installing maven
+      raw: yum remove maven -y
+
+
+
+
+=======================================
+CONDITIONS
+===========================================
+
+CLUSTER: group of servers/nodes which communicate with each other.
+HOMOGENIUS: all servers with same os and flavour.
+HETROGENIUS: all servers with different os and flavour.
+
+RedHat: yum
+Ubuntu: apt
+Python : pip  (if you want to install numpy and pandas in python use pip)
+
+
+ansible all -m setup
+ansible all -m setup | grep -i family
+
+
+CONDITIONS:
+
+- hosts: all
+  tasks:
+    - name: installing apache on RedHat
+      yum: name=httpd state=present
+      when: ansible_os_family == "RedHat"
+
+    - name: installing apache on Ubuntu
+      apt: name=apache2 state=present
+      when: ansible_os_family == "Debian"
+
+ansible all -m setup
+ansible all -m setup | grep -i family
+
+
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: installing apache on RedHat
+      yum: name=httpd state=present
+      when: ansible_os_family == "RedHat"
+
+    - name: installing apache on Ubuntu
+      apt: name=apache2 state=present
+      when: ansible_os_family == "Debian"
+
+if you want to install only on dev-1 node
+
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: installing apache on RedHat
+      yum: name=httpd state=present
+      when: ansible_nodename == "dev-1"
+
+=======================================
+
+LAMP:
+
+L : LINUX
+A : APACHE
+M : MYSQL
+P : PHP or Python
+
+WAMP - IN WIndows, Windows, apache, MySQL and php or python
+
+In node machine we are using amazon Linux 2 , it has already python installed , so last module will not work
+
+---
+- name: LAMP
+  hosts: all
+  tasks:
+    - name: Installing Apache
+      yum: name=httpd state=present
+
+    - name: Installing Mysql
+      yum: name=mysql state=present
+
+    - name: Installing Python
+      yum: name=python3 state=present
+
+=============================
+LOOKUPS -
+============================
+
+Lookup --> this module is used to read the data from file, db, and key value
+
+For Example: create a file creds.txt  --> username:reya, password:123
+
+---
+- name: Lookups
+  hosts: all
+  vars:
+    creds: "{{lookup('file', '/root/creds.txt')}}"
+  tasks:
+    - debug:
+        msg: "My Credentials are {{creds}}"

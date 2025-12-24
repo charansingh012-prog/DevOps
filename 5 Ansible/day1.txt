@@ -1,0 +1,261 @@
+ANSIBLE:
+
+Simply It is a IT automation tool
+its a Configuration Management Tool.
+
+Launch Amazon Linux 2 , t2.micro
+
+Installation, Ansible needs python
+----------------------------------
+
+amazon-linux-extras install ansible2 -y
+
+yum install python3 python-pip python-dlevel -y
+
+ansible --version
+
+Examples: Adhoc Commands
+------------------------
+
+ansible -m ping localhost    [Ping localhost]
+
+-a = argument
+
+ansible localhost -a "yum install git -y"
+ansible localhost -a "git --version"
+ansible localhost -a "yum install maven -y"
+ansible localhost -a "mvn --version"
+ansible localhost -a "touch file1"
+
+ansible localhost -a "ls"
+
+ansible localhost -a "yum install httpd -y"
+
+ansible localhost -a "systemctl status httpd"
+
+ansible localhost -a "systemctl start httpd"
+
+ansible localhost -a "user add reyaz"
+
+ansible localhost -a "cat /etc/passwd"
+
+ansible localhost -a "yum remove git* maven* httpd* -y"
+
+SETUP:
+======
+
+CREATE 5 SERVERS - Amazon Linux 2 [1=ANSIBLE Master, 2=PROD, 2=DEV]
+
+EXECUTE THE BELOW COMMANDS ON ALL SERVERS:
+sudo -i
+hostnamectl set-hostname ansible/prod-1/prod-2/dev-1/dev-2
+sudo -i
+
+Now Root user from ansible server needs to login to all servers using root username and password
+
+Do below commands in all servers using multi-exec
+
+## first set the password for root
+passwd root  
+
+set new password: root123456
+
+## enable all server to login as root
+
+vi /etc/ssh/sshd_config (38 & 61 uncomment both lines)
+systemctl restart sshd
+systemctl status sshd
+hostname -i  -- to see the private ip
+
+Go to Ansible Master
+--------------------
+Lets Generate SSH Keys, using this KEY Ansible server will communicate with worker nodes
+
+ssh-keygen
+
+ll .ssh
+
+
+ssh-copy-id root@private ip of prod-1 -- > yes -- > password -- > ssh private ip -- > ctrl d
+ssh-copy-id root@private ip of prod-2 -- > yes -- > password -- > ssh private ip -- > ctrl d
+ssh-copy-id root@private ip of dev-1 -- > yes -- > password -- > ssh private ip -- > ctrl d
+ssh-copy-id root@private ip of dev-2 -- > yes -- > password -- > ssh private ip -- > ctrl d
+
+just to see the connection
+
+ssh ec2-user@privateip
+
+
+Inventory file
+=============
+
+There are 2 types of inventory file, static and Dynamic
+
+vi /etc/ansible/hosts
+# Ex 1: Ungrouped hosts, specify before any group headers.
+[prod]
+172.31.20.40
+172.31.21.25
+[dev]
+172.31.31.77
+172.31.22.114
+
+
+Another method for authentication
+---------------------------------
+In host file create variables
+
+[all:var]
+ansible_user=ec2-user
+ansible_ssh_private_key_file=/home/ec2-user/MyKey.pem
+
+-----------------------------------------------------
+
+
+ansible-inventory --list   --> This will show the inventory list
+
+ansible -m ping all : To check worker node connection with ansible server.
+
+1. ADHOC COMMANDS:
+-----------------
+these are simple Linux commands.
+ADHOC commands  are great for tasks you repeat daily
+These are used for temp works.
+
+-a = argument
+
+ansible all -a "yum update -y"
+ansible all -a "yum install git -y"
+ansible all -a "git --version"
+ansible all -a "yum install maven -y"
+ansible all -a "mvn --version"
+ansible all -a "touch file1"
+ansible all -a "touch reyaz.txt"
+ansible all -a "ls"
+ansible all -a "yum install httpd -y"
+ansible all -a "systemctl status httpd"
+ansible all -a "systemctl start httpd"
+ansible all -a "user add reyaz"
+ansible all -a "cat /etc/passwd"
+ansible all -a "yum remove git* maven* httpd* -y"
+
+
+Delete all software, lets play with empty servers
+
+ansible all -a "yum remove git* maven* httpd* tree* -y"
+
+
+Modules supports
+-----------------
+
+
+ADHOC commands  are great for tasks you repeat daily
+
+ADHOC     : ansible all -a "yum install git -y"
+          ansible all -a "yum remove git* -y"
+-----
+
+Ansible Modules are units of code that can control system resources or execute system commands
+
+MODULE    : ansible all -m yum -a "name=git state=present"  --> -m is module , name = packagename, , state = present(install)
+------
+
+States:
+-------
+yum modules (States for Package Management)
+-----------
+Present = install
+absent = uninstall
+latest = install or upgrades to latest version
+
+
+Services module (States for Service Management)
+---------------
+started = start
+stopped = stop
+restarted = restart the service
+enabled = Ensures the service starts on boot.
+
+
+
+
+
+
+install packages with modules
+--------------------------------
+ansible all -m yum -a "name=git state=present"
+
+ansible all -a "git -v"
+
+ansible all -m yum -a "name=maven state=present"
+
+To install Apache service
+------------------------
+
+ansible all -m yum -a "name=httpd state=present"
+
+TO see the Version of Apache
+----------------------------
+
+ansible all -a "httpd -v"
+
+TO start Apache
+----------------
+
+ansible all -m service -a "name=httpd state=started"  
+
+---> this is use to start the service {we changed module yum to service, because yum to install, service to start}
+
+TO see the status of Apache
+------------------------
+
+ansible all -a "systemctl status httpd" --> to see the status of httpd in all servers
+
+To Stop Apache service
+---------------------
+
+ansible all -m service -a "name=httpd state=stopped" --> to stop the service
+
+Update Apache to latest version
+------------------------------
+
+ansible all -m yum -a "name=httpd state=latest"   --> to update to latest version
+
+uninstall apache:
+---------------
+
+ansible all -m yum -a "name=httpd state=absent"  ---> to uninstall httpd, absent = uninstall
+
+
+==================================
+
+TO create users in servers
+--------------------
+
+ansible all -m user -a "name=reyaz state=present"  --> present = to create
+
+ansible all -a "cat /etc/passwd"
+
+create another user
+
+==============================
+
+To create a file
+--------------
+
+touch file1
+
+ansible all -m copy -a "src=file1 dest=/home/ec2-user/"
+
+ansible all -a "ls /home/ec2-user"
+
+====================
+
+Remove all packages
+----------------
+
+ansible all -a "yum remove  maven* git* httpd* -y"
+
+==============================================
+
+yum , service, user etc all these are modules
